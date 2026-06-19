@@ -930,6 +930,258 @@ function AddDrawTab({mobile, customDraws, onAdd, onDelete}){
 }
 
 // ═══════════════════════════════════════════════════════════════
+// CONSECUTIVE PATTERN ENGINE
+// A "consecutive" = 2+ numbers in sequential order. Pattern "2-2-1" =
+// two pairs + one lone number.
+// ═══════════════════════════════════════════════════════════════
+function getConsecPattern(nums){
+  const sorted = [...nums].sort((a,b)=>a-b);
+  const clusters = [];
+  let current = [sorted[0]];
+  for(let i=1;i<sorted.length;i++){
+    if(sorted[i] === sorted[i-1]+1) current.push(sorted[i]);
+    else { clusters.push(current); current=[sorted[i]]; }
+  }
+  clusters.push(current);
+  const lengths = clusters.map(c=>c.length).sort((a,b)=>b-a);
+  const consecutiveClusters = clusters.filter(c=>c.length>=2);
+  return {
+    clusters, consecutiveClusters, lengths,
+    patternStr: lengths.join("-"),
+    hasConsecutive: consecutiveClusters.length>0,
+    maxRun: Math.max(...lengths),
+  };
+}
+
+function classifyConsec(lengths){
+  const nonOnes = lengths.filter(l=>l>1);
+  if(nonOnes.length===0) return "No consecutive";
+  if(nonOnes.length===1 && nonOnes[0]===2) return "One pair";
+  if(nonOnes.length===1 && nonOnes[0]>=3) return `One run of ${nonOnes[0]}`;
+  if(nonOnes.length===2 && nonOnes.every(n=>n===2)) return "Two pairs";
+  if(nonOnes.length>=2) return `Multiple runs (${nonOnes.length})`;
+  return "Other";
+}
+
+function ConsecNumbers({nums, clusters}){
+  const CLUSTER_COLORS=[R,G,O,P,B,"#c026d3"];
+  const numToCluster = {};
+  let ci=0;
+  clusters.forEach(c=>{ if(c.length>=2){ c.forEach(n=>numToCluster[n]=ci); ci++; } });
+  return(
+    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+      {[...nums].sort((a,b)=>a-b).map(n=>{
+        const inCluster = numToCluster[n]!==undefined;
+        const color = inCluster ? CLUSTER_COLORS[numToCluster[n]%CLUSTER_COLORS.length] : "rgba(255,255,255,0.08)";
+        return(
+          <div key={n} style={{width:30,height:30,borderRadius:7,
+            background:inCluster?color:"rgba(255,255,255,0.08)",
+            color:inCluster?"#fff":"#999",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            fontSize:12,fontWeight:inCluster?900:600,
+            border:inCluster?`2px solid ${color}`:"1px solid rgba(255,255,255,0.1)"
+          }}>{n}</div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TAB — CONSECUTIVE (Browser + Stats + Checker via sub-tabs)
+// ═══════════════════════════════════════════════════════════════
+function ConsecutiveTab({draws, mobile}){
+  const[sub,setSub]=useState("browser");
+  const[filter,setFilter]=useState("all");
+  const[picked,setPicked]=useState([]);
+
+  const enriched = useMemo(()=>draws.map(d=>({...d, pattern:getConsecPattern(d.n)})), [draws]);
+
+  const filtered = useMemo(()=>{
+    if(filter==="none") return enriched.filter(d=>!d.pattern.hasConsecutive);
+    if(filter==="has") return enriched.filter(d=>d.pattern.hasConsecutive);
+    return enriched;
+  },[enriched,filter]);
+
+  const patternFreq = useMemo(()=>{
+    const f={}; enriched.forEach(d=>{f[d.pattern.patternStr]=(f[d.pattern.patternStr]||0)+1;});
+    return Object.entries(f).sort((a,b)=>b[1]-a[1]);
+  },[enriched]);
+  const total = enriched.length;
+  const hasConsec = enriched.filter(d=>d.pattern.hasConsecutive).length;
+  const noConsec = total - hasConsec;
+  const lengthDist = useMemo(()=>{
+    const dist={}; enriched.forEach(d=>d.pattern.consecutiveClusters.forEach(c=>{dist[c.length]=(dist[c.length]||0)+1;}));
+    return Object.entries(dist).sort((a,b)=>a[0]-b[0]);
+  },[enriched]);
+  const maxRunEver = Math.max(...enriched.map(d=>d.pattern.maxRun));
+  const maxRunDraws = enriched.filter(d=>d.pattern.maxRun===maxRunEver);
+
+  const togglePick=(n)=>setPicked(prev=>prev.includes(n)?prev.filter(x=>x!==n):prev.length>=6?prev:[...prev,n].sort((a,b)=>a-b));
+  const checkPattern = useMemo(()=>picked.length>0?getConsecPattern(picked):null,[picked]);
+  const matchingDraws = useMemo(()=>{
+    if(!checkPattern||picked.length<2) return [];
+    return draws.filter(d=>getConsecPattern(d.n).patternStr===checkPattern.patternStr);
+  },[checkPattern,draws,picked]);
+
+  return(
+    <div>
+      {/* explainer */}
+      <div style={{background:"rgba(123,94,167,0.08)",border:"1px solid rgba(123,94,167,0.25)",borderRadius:12,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#ccc"}}>
+        🔢 Consecutive = 2+ numbers in sequence. Pattern <strong style={{color:P}}>"2-2-1"</strong> = two pairs + one lone number (e.g. 1,2 · 5,6 · 10).
+      </div>
+
+      {/* sub-tabs */}
+      <div style={{display:"flex",gap:6,marginBottom:16}}>
+        {[{id:"browser",l:"📋 Browser"},{id:"stats",l:"📊 Stats"},{id:"checker",l:"🔢 Checker"}].map(s=>(
+          <button key={s.id} onClick={()=>setSub(s.id)} style={{
+            padding:"7px 14px",borderRadius:9,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,
+            background:sub===s.id?P:"rgba(255,255,255,0.06)",color:"#fff"
+          }}>{s.l}</button>
+        ))}
+      </div>
+
+      {/* BROWSER */}
+      {sub==="browser" && <div>
+        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+          {[{id:"all",l:"All"},{id:"has",l:"Has consecutive"},{id:"none",l:"No consecutive"}].map(f=>(
+            <button key={f.id} onClick={()=>setFilter(f.id)} style={{
+              padding:"6px 14px",borderRadius:9,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,
+              background:filter===f.id?R:"rgba(255,255,255,0.07)",color:"#fff"}}>{f.l}</button>
+          ))}
+          <span style={{fontSize:11,color:"#666",alignSelf:"center",marginLeft:6}}>{filtered.length} draws</span>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:560,overflowY:"auto"}}>
+          {[...filtered].reverse().map((draw,i)=>(
+            <div key={i} style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:"10px 12px"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:6}}>
+                <span style={{fontSize:12,color:O,fontWeight:700}}>{draw.d}</span>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:11,color:draw.pattern.hasConsecutive?G:"#555",fontWeight:700,fontFamily:"monospace",
+                    background:draw.pattern.hasConsecutive?"rgba(42,157,143,0.15)":"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>
+                    {draw.pattern.patternStr}</span>
+                  <span style={{fontSize:10,color:"#666"}}>{classifyConsec(draw.pattern.lengths)}</span>
+                </div>
+              </div>
+              <ConsecNumbers nums={draw.n} clusters={draw.pattern.clusters}/>
+            </div>
+          ))}
+        </div>
+      </div>}
+
+      {/* STATS */}
+      {sub==="stats" && <div>
+        <div style={{display:"grid",gridTemplateColumns:mobile?"1fr 1fr":"repeat(3,1fr)",gap:10,marginBottom:20}}>
+          <div style={{background:"rgba(42,157,143,0.08)",border:"1px solid rgba(42,157,143,0.2)",borderRadius:12,padding:14,textAlign:"center"}}>
+            <div style={{fontSize:24,fontWeight:900,color:G}}>{hasConsec}</div>
+            <div style={{fontSize:11,color:"#888"}}>Has consecutive</div>
+            <div style={{fontSize:10,color:"#555"}}>{(hasConsec/total*100).toFixed(1)}%</div>
+          </div>
+          <div style={{background:"rgba(230,57,70,0.08)",border:"1px solid rgba(230,57,70,0.2)",borderRadius:12,padding:14,textAlign:"center"}}>
+            <div style={{fontSize:24,fontWeight:900,color:R}}>{noConsec}</div>
+            <div style={{fontSize:11,color:"#888"}}>No consecutive</div>
+            <div style={{fontSize:10,color:"#555"}}>{(noConsec/total*100).toFixed(1)}%</div>
+          </div>
+          <div style={{background:"rgba(244,129,58,0.08)",border:"1px solid rgba(244,129,58,0.2)",borderRadius:12,padding:14,textAlign:"center"}}>
+            <div style={{fontSize:24,fontWeight:900,color:O}}>{maxRunEver}</div>
+            <div style={{fontSize:11,color:"#888"}}>Longest run ever</div>
+            <div style={{fontSize:10,color:"#555"}}>{maxRunDraws.length}x</div>
+          </div>
+        </div>
+        <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:14,marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#888",marginBottom:10}}>Pattern frequency (all {total} draws)</div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {patternFreq.map(([pattern,count])=>{
+              const pct=count/total*100; const maxCount=patternFreq[0][1];
+              return(
+                <div key={pattern} style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:12,color:O,fontWeight:700,minWidth:64,fontFamily:"monospace"}}>{pattern}</span>
+                  <div style={{flex:1,background:"rgba(255,255,255,0.04)",borderRadius:4,height:20,overflow:"hidden",position:"relative"}}>
+                    <div style={{width:`${(count/maxCount)*100}%`,height:"100%",background:`linear-gradient(90deg,${R},${O})`,borderRadius:4}}/>
+                    <span style={{position:"absolute",right:6,top:1,fontSize:10,color:"#fff",fontWeight:700}}>{count} ({pct.toFixed(1)}%)</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:14,marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#888",marginBottom:6}}>Run-length distribution</div>
+          <div style={{fontSize:11,color:"#555",marginBottom:10}}>How many runs of each length appeared</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            {lengthDist.map(([len,count])=>(
+              <div key={len} style={{textAlign:"center",background:"rgba(244,129,58,0.08)",borderRadius:10,padding:"10px 16px",border:"1px solid rgba(244,129,58,0.2)"}}>
+                <div style={{fontSize:20,fontWeight:900,color:O}}>{count}</div>
+                <div style={{fontSize:10,color:"#888"}}>runs of {len}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{background:"rgba(123,94,167,0.07)",border:"1px solid rgba(123,94,167,0.2)",borderRadius:12,padding:14}}>
+          <div style={{fontSize:13,fontWeight:700,color:P,marginBottom:10}}>🔥 Longest run ever: {maxRunEver}</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {maxRunDraws.map((draw,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <span style={{fontSize:11,color:"#888",minWidth:80}}>{draw.d}</span>
+                <ConsecNumbers nums={draw.n} clusters={draw.pattern.clusters}/>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>}
+
+      {/* CHECKER */}
+      {sub==="checker" && <div style={{display:"flex",flexDirection:mobile?"column":"row",gap:mobile?14:20}}>
+        <div style={{flexShrink:0}}>
+          <div style={{fontSize:11,color:"#888",marginBottom:8,textAlign:"center"}}>
+            Numbers select karanna (max 6) {picked.length>0&&<span style={{color:G,fontWeight:700}}>{picked.length}/6</span>}
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,maxWidth:mobile?320:420,background:"rgba(255,255,255,0.02)",borderRadius:12,padding:10,border:"1px solid rgba(255,255,255,0.06)"}}>
+            {Array.from({length:90},(_,i)=>i+1).map(n=>{
+              const isP=picked.includes(n);
+              return(<div key={n} onClick={()=>togglePick(n)} style={{width:mobile?26:30,height:mobile?26:30,borderRadius:6,
+                background:isP?G:"rgba(255,255,255,0.05)",color:isP?"#fff":"#888",
+                display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:isP?800:600,cursor:"pointer"}}>{n}</div>);
+            })}
+          </div>
+          <button onClick={()=>setPicked([])} style={{marginTop:10,padding:"8px 16px",borderRadius:10,border:"1px solid rgba(255,255,255,0.1)",background:"transparent",color:"#aaa",cursor:"pointer",fontSize:12,fontWeight:700,width:"100%"}}>Clear</button>
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          {!checkPattern && <div style={{textAlign:"center",padding:"50px 20px",color:"#444"}}>
+            <div style={{fontSize:32,marginBottom:10}}>🔢</div>
+            <div style={{fontSize:13}}>Numbers select karanna pattern eka balanna</div>
+          </div>}
+          {checkPattern && <>
+            <div style={{background:"rgba(42,157,143,0.1)",border:"1px solid rgba(42,157,143,0.25)",borderRadius:12,padding:14,marginBottom:14}}>
+              <div style={{fontSize:11,color:"#888",marginBottom:8}}>Your numbers:</div>
+              <ConsecNumbers nums={picked} clusters={checkPattern.clusters}/>
+              <div style={{marginTop:10,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18,fontWeight:900,color:O,fontFamily:"monospace"}}>{checkPattern.patternStr}</span>
+                <span style={{fontSize:12,color:G}}>{classifyConsec(checkPattern.lengths)}</span>
+              </div>
+            </div>
+            <div style={{fontSize:12,color:"#888",marginBottom:8}}>
+              Same pattern ({checkPattern.patternStr}) past: <span style={{color:G,fontWeight:700}}>{matchingDraws.length}</span> / {draws.length}
+              <span style={{color:"#555",marginLeft:6}}>({(matchingDraws.length/draws.length*100).toFixed(1)}%)</span>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:300,overflowY:"auto"}}>
+              {matchingDraws.slice().reverse().map((draw,i)=>{
+                const p=getConsecPattern(draw.n);
+                return(<div key={i} style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:8,padding:"6px 10px",display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:11,color:O,minWidth:80}}>{draw.d}</span>
+                  <ConsecNumbers nums={draw.n} clusters={p.clusters}/>
+                </div>);
+              })}
+              {matchingDraws.length===0 && picked.length>=2 && <div style={{fontSize:12,color:"#444"}}>No past draw has this exact pattern yet.</div>}
+            </div>
+          </>}
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
 export default function App(){
@@ -968,6 +1220,7 @@ export default function App(){
     {label:"🎯",full:"Checker",C:CheckerTab},
     {label:"📅",full:"Draws",C:DrawTab},
     {label:"🤖",full:"Predict",C:PredictTab},
+    {label:"🔢",full:"Consec",C:ConsecutiveTab},
     {label:"➕",full:"Add Draw",C:null},
   ];
   const{C}=tabs[tab];
@@ -998,7 +1251,7 @@ export default function App(){
         </div>
       </div>
       <div style={{padding:mobile?"14px 10px":"24px 28px",maxWidth:1100,margin:"0 auto"}}>
-        {tab===4
+        {C===null
           ? <AddDrawTab mobile={mobile} customDraws={customDraws} onAdd={handleAddDraw} onDelete={handleDeleteDraw}/>
           : <C mobile={mobile} draws={draws}/>
         }
